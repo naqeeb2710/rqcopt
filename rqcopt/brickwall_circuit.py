@@ -1,4 +1,10 @@
 import numpy as np
+import jax.numpy as jnp
+from jax import grad, jit, vmap
+from jax import random
+from jax import config
+import jax
+config.update("jax_enable_x64", True)
 from .util import project_unitary_tangent, antisymm, real_to_antisymm, antisymm_to_real
 
 
@@ -8,13 +14,39 @@ def parallel_gates(V, L, perm=None):
     optionally with subsequent permutation of quantum wires.
     """
     assert L % 2 == 0
-    W = np.identity(1)
+    W = jnp.identity(1)
     for i in range(L // 2):
-        W = np.kron(W, V)
+        W = jnp.kron(W, V)
     if perm is not None:
         W = permute_operation(W, perm)
     return W
 
+# Original version
+# def parallel_gates_grad(V, L, U, perm=None):
+#     """
+#     Compute the gradient of Re tr[U† (V ⊗ ... ⊗ V)] with respect to V.
+#     """
+#     assert V.shape == (4, 4)
+#     assert U.shape == (2**L, 2**L)
+#     assert L % 2 == 0
+#     if perm is not None:
+#         inv_perm = jnp.argsort(perm)
+#         U = permute_operation(U, inv_perm)
+#     G = jnp.zeros_like(V)
+#     for i in range(0, L, 2):
+#         Ua = parallel_gates(V, i)
+#         Ub = parallel_gates(V, L-i-2)
+#         T = jnp.reshape(U, 2 * (2**i, 4, 2**(L-i-2)))
+#         T = jnp.tensordot(Ua.conj(), T, axes=((0, 1), (0, 3)))
+#         T = jnp.tensordot(Ub.conj(), T, axes=((0, 1), (1, 3)))
+#         assert T.ndim == 2
+#         G += T
+#     return G
+
+
+def parallel_gates_grad_jax(V, L, U, perm=None):
+    grad_parallel_gates = jax.grad(lambda v: jnp.trace(U.conj().T @ parallel_gates(v, L, perm)).real)
+    return grad_parallel_gates(V)
 
 def parallel_gates_grad(V, L, U, perm=None):
     """
@@ -30,12 +62,43 @@ def parallel_gates_grad(V, L, U, perm=None):
     for i in range(0, L, 2):
         Ua = parallel_gates(V, i)
         Ub = parallel_gates(V, L-i-2)
-        T = np.reshape(U, 2 * (2**i, 4, 2**(L-i-2)))
-        T = np.tensordot(Ua.conj(), T, axes=((0, 1), (0, 3)))
-        T = np.tensordot(Ub.conj(), T, axes=((0, 1), (1, 3)))
-        assert T.ndim == 2
+        # Conjugate the quantum gates
+        Ua_conj = np.conj(Ua)
+        Ub_conj = np.conj(Ub)
+        # Reshape U tensor
+        T_shape = (2 * (2**i, 4, 2**(L-i-2)))
+        T = np.reshape(U, T_shape)
+        # Contract Ua_conj with T along axes (0, 1) and (0, 3)
+        T = np.tensordot(Ua_conj, T, axes=((0, 1), (0, 3)))
+        # Contract Ub_conj with T along axes (0, 1) and (1, 3)
+        T = np.tensordot(Ub_conj, T, axes=((0, 1), (1, 3)))
         G += T
     return G
+    
+
+
+# old version
+# def parallel_gates_directed_grad(V, L, Z, perm=None):
+#     """
+#     Compute the gradient of V ⊗ ... ⊗ V in direction `Z`.
+#     """
+#     assert L % 2 == 0
+#     G = 0
+#     for i in range(L // 2):
+#         W = np.identity(1)
+#         for j in range(L // 2):
+#             if i == j:
+#                 W = np.kron(W, Z)
+#             else:
+#                 W = np.kron(W, V)
+#         G += W
+#     if perm is not None:
+#         G = permute_operation(G, perm)
+#     return G
+
+def parallel_gates_directed_grad_jax(V, L, Z, perm=None):
+    grad_directed_gates = jax.grad(lambda v: jnp.trace(parallel_gates_directed(v, L, Z, perm).conj().T @ V).real)
+    return grad_directed_gates(V)
 
 
 def parallel_gates_directed_grad(V, L, Z, perm=None):
@@ -44,19 +107,38 @@ def parallel_gates_directed_grad(V, L, Z, perm=None):
     """
     assert L % 2 == 0
     G = 0
+    """
+    precomputed the components of the tensor products that do not change within the loop and stored them in the list W_components
+    """
+    W_components = [Z if i == j else V for i in range(L // 2) for j in range(L // 2)]
+    
     for i in range(L // 2):
-        W = np.identity(1)
+        W = jnp.identity(1)
         for j in range(L // 2):
-            if i == j:
-                W = np.kron(W, Z)
-            else:
-                W = np.kron(W, V)
+            W = jnp.kron(W, W_components[j + i * (L // 2)])
         G += W
+    
     if perm is not None:
         G = permute_operation(G, perm)
+    
     return G
 
+def parallel_gates_directed_grad_jax(V, L, Z, perm=None):
+    def loss_function(v):
+        # Construct the tensor product directly in the loss function
+        W_components = [Z if i == j else V for i in range(L // 2) for j in range(L // 2)]
+        directed_gate_matrix = jnp.eye(1)
+        for i in range(L // 2):
+            for j in range(L // 2):
+                directed_gate_matrix = jnp.kron(directed_gate_matrix, W_components[j + i * (L // 2)])
+        return jnp.trace(jnp.conj(directed_gate_matrix.T) @ V).real
+    
+    grad_directed_gates = jax.grad(loss_function)
+    return grad_directed_gates(V)
 
+
+
+# Original version
 def parallel_gates_hess(V, L, Z, U, perm=None, unitary_proj=False):
     """
     Compute the Hessian of V -> Re tr[U† (V ⊗ ... ⊗ V)] in direction Z.
@@ -66,33 +148,53 @@ def parallel_gates_hess(V, L, Z, U, perm=None, unitary_proj=False):
     assert U.shape == (2**L, 2**L)
     assert L % 2 == 0 and L > 0
     if perm is not None:
-        inv_perm = np.argsort(perm)
+        inv_perm = jnp.argsort(perm)
         U = permute_operation(U, inv_perm)
-    G = np.zeros_like(V)
+    G = jnp.zeros_like(V)
     for i in range(0, L, 2):
         for j in range(0, i, 2):
             # j < i
             Va = parallel_gates(V, j)
             Vb = parallel_gates(V, i-j-2)
             Vc = parallel_gates(V, L-i-2)
-            T = np.reshape(U, 2 * (2**j, 4, 2**(i-j-2), 4, 2**(L-i-2)))
-            G += np.einsum(T, range(10), Va.conj(), (0, 5), Z.conj(), (1, 6), Vb.conj(), (2, 7), Vc.conj(), (4, 9), (3, 8))
+            T = jnp.reshape(U, 2 * (2**j, 4, 2**(i-j-2), 4, 2**(L-i-2)))
+            G += jnp.einsum(T, range(10), Va.conj(), (0, 5), Z.conj(), (1, 6), Vb.conj(), (2, 7), Vc.conj(), (4, 9), (3, 8))
         for j in range(i + 2, L, 2):
             # i < j
             Va = parallel_gates(V, i)
             Vb = parallel_gates(V, j-i-2)
             Vc = parallel_gates(V, L-j-2)
-            T = np.reshape(U, 2 * (2**i, 4, 2**(j-i-2), 4, 2**(L-j-2)))
-            G += np.einsum(T, range(10), Va.conj(), (0, 5), Vb.conj(), (2, 7), Z.conj(), (3, 8), Vc.conj(), (4, 9), (1, 6))
+            T = jnp.reshape(U, 2 * (2**i, 4, 2**(j-i-2), 4, 2**(L-j-2)))
+            G += jnp.einsum(T, range(10), Va.conj(), (0, 5), Vb.conj(), (2, 7), Z.conj(), (3, 8), Vc.conj(), (4, 9), (1, 6))
     if unitary_proj:
         G = project_unitary_tangent(V, G)
         # additional terms resulting from the projection of the gradient
         # onto the Stiefel manifold (unitary matrices)
         grad = parallel_gates_grad(V, L, U, perm=None)  # U is already permuted
         G -= 0.5 * (Z @ grad.conj().T @ V + V @ grad.conj().T @ Z)
-        if not np.allclose(Z, project_unitary_tangent(V, Z)):
+        if not jnp.allclose(Z, project_unitary_tangent(V, Z)):
             G -= 0.5 * (Z @ V.conj().T + V @ Z.conj().T) @ grad
     return G
+
+
+# def parallel_gates_hess_jvp(V, L, Z, U, perm=None, unitary_proj=False):
+#     """
+#     Compute the Hessian of V -> Re tr[U† (V ⊗ ... ⊗ V)] in direction Z using JVP.
+#     """
+#     def jvp_parallel_gates(V, t, i):
+#         return parallel_gates(V + t * Z, i)
+    
+#     def jvp_parallel_gates_grad(V, t, i):
+#         return jax.grad(lambda V: jnp.trace(U.conj().T @ parallel_gates(V, i)))(V + t * Z)
+    
+#     G = jnp.zeros_like(V)
+    
+#     for i in range(0, L, 2):
+#         G += jax.jvp(lambda t: jnp.trace(U.conj().T @ jvp_parallel_gates(V, t, i)))(0.0, 0.0)[1]
+#         G += jax.jvp(lambda t: jnp.trace(U.conj().T @ jvp_parallel_gates_grad(V, t, i)))(0.0, 0.0)[1]
+    
+#     return G
+
 
 
 def brickwall_unitary(Vlist, L, perms):
@@ -100,7 +202,7 @@ def brickwall_unitary(Vlist, L, perms):
     Construct the unitary matrix representation of a brickwall-type
     quantum circuit with periodic boundary conditions.
     """
-    W = np.identity(2**L)
+    W = jnp.identity(2**L)
     for V, perm in zip(Vlist, perms):
         W = parallel_gates(V, L, perm) @ W
     return W
@@ -265,7 +367,7 @@ def permute_operation(U: np.ndarray, perm):
     nsites = len(perm)
     assert U.shape == (2**nsites, 2**nsites)
     perm = list(perm)
-    U = np.reshape(U, (2*nsites) * (2,))
-    U = np.transpose(U, perm + [nsites + p for p in perm])
-    U = np.reshape(U, (2**nsites, 2**nsites))
+    U = jnp.reshape(U, (2*nsites) * (2,))
+    U = jnp.transpose(U, perm + [nsites + p for p in perm])
+    U = jnp.reshape(U, (2**nsites, 2**nsites))
     return U

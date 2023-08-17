@@ -1,6 +1,13 @@
 import numpy as np
+import jax.numpy as jnp
+from jax import grad, jit, vmap
+from jax import random
+from jax import config
+import jax
+config.update("jax_enable_x64", True)
 from scipy.stats import unitary_group
 import unittest
+import time
 import rqcopt as oc
 
 
@@ -107,11 +114,30 @@ class TestBrickwallCircuit(unittest.TestCase):
         # surrounding matrix
         U = 0.5 * oc.crandn(2 * (2**L,), rng)
         perm = rng.permutation(L)
+        # Start timing for the computation
+        start_time = time.time()
         dV = oc.parallel_gates_grad(V, L, U, perm)
+        # End timing
+        end_time = time.time()
+        # Calculate the elapsed time
+        elapsed_time = end_time - start_time
         # numerical gradient via finite difference approximation
         f = lambda v: np.trace(U.conj().T @ oc.parallel_gates(v, L, perm)).real
+        # Start timing for the numerical gradient computation
+        start_time_num = time.time()
+    
         dV_num = 2 * eval_numerical_gradient_complex(f, V, h=1e-6).conj()
+    
+        # End timing
+        end_time_num = time.time()
+    
+        # Calculate the elapsed time for numerical gradient computation
+        elapsed_time_num = end_time_num - start_time_num
+    
         self.assertTrue(np.allclose(dV_num, dV))
+    
+        print("Time taken (parallel_gates_grad):", elapsed_time)
+        print("Time taken (numerical gradient):", elapsed_time_num)
 
     def test_parallel_gates_directed_gradient(self):
         """
@@ -184,7 +210,8 @@ class TestBrickwallCircuit(unittest.TestCase):
         f = lambda ulist: np.linalg.norm(oc.brickwall_unitary(ulist, L, perms) - U, "fro")**2
         dVlist_num = 2 * eval_numerical_gradient_complex(f, Vlist.copy(), h=1e-6).conj()
         self.assertTrue(np.allclose(dVlist_num, dVlist))
-
+    
+    # original test
     def test_brickwall_unitary_directed_gradient(self):
         """
         Test directed gradient computation for a brickwall of parallel gates.
@@ -207,6 +234,38 @@ class TestBrickwallCircuit(unittest.TestCase):
             h = 1e-6
             dW_num = (f(h) - f(-h)) / (2*h)
             self.assertTrue(np.allclose(dW_num, dW))
+
+    # def test_brickwall_unitary_directed_gradient(self):
+    #     """
+    #     Test directed gradient computation for a brickwall of parallel gates.
+    #     """
+    #     rng = jax.random.PRNGKey(0)
+    #     # system size
+    #     L = 8
+    #     # number of layers
+    #     n = 5
+    #     # random unitaries
+    #     Vlist = [jax.random.normal(rng, (4, 4)) for _ in range(n)]
+    #     # random permutations
+    #     perms = [jax.random.permutation(rng, L) for _ in range(n)]
+    #     for k in range(n):
+    #         # direction
+    #         Z = 0.5 * jax.random.normal(rng, (4, 4))
+    #         # Define a scalar function that depends on Z and the output of brickwall_unitary_directed_grad
+    #         def scalar_function_to_differentiate(Z):
+    #             directed_grad_output = oc.brickwall_unitary_directed_grad(Vlist, L, Z, k, perms)
+    #             scalar_output = jnp.trace(directed_grad_output)  # Compute a scalar value from the output
+    #             return scalar_output
+            
+    #         # Calculate the gradient function
+    #         grad_scalar_function = grad(scalar_function_to_differentiate)
+    #         dW = grad_scalar_function(Z)
+            
+    #         # numerical gradient via finite difference approximation
+    #         f = lambda t: scalar_function_to_differentiate(Z + t)
+    #         h = 1e-6
+    #         dW_num = (f(h) - f(-h)) / (2 * h)
+    #         self.assertTrue(jnp.allclose(dW_num, dW))
 
     def test_brickwall_unitary_hessian(self):
         """
