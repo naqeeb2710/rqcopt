@@ -21,29 +21,6 @@ def parallel_gates(V, L, perm=None):
         W = permute_operation(W, perm)
     return W
 
-# Original version
-# def parallel_gates_grad(V, L, U, perm=None):
-#     """
-#     Compute the gradient of Re tr[U† (V ⊗ ... ⊗ V)] with respect to V.
-#     """
-#     assert V.shape == (4, 4)
-#     assert U.shape == (2**L, 2**L)
-#     assert L % 2 == 0
-#     if perm is not None:
-#         inv_perm = jnp.argsort(perm)
-#         U = permute_operation(U, inv_perm)
-#     G = jnp.zeros_like(V)
-#     for i in range(0, L, 2):
-#         Ua = parallel_gates(V, i)
-#         Ub = parallel_gates(V, L-i-2)
-#         T = jnp.reshape(U, 2 * (2**i, 4, 2**(L-i-2)))
-#         T = jnp.tensordot(Ua.conj(), T, axes=((0, 1), (0, 3)))
-#         T = jnp.tensordot(Ub.conj(), T, axes=((0, 1), (1, 3)))
-#         assert T.ndim == 2
-#         G += T
-#     return G
-
-
 def parallel_gates_grad_jax(V, L, U, perm=None):
     grad_parallel_gates = jax.grad(lambda v: jnp.trace(U.conj().T @ parallel_gates(v, L, perm)).real)
     return grad_parallel_gates(V)
@@ -75,27 +52,6 @@ def parallel_gates_grad(V, L, U, perm=None):
         G += T
     return G
     
-
-
-# old version
-# def parallel_gates_directed_grad(V, L, Z, perm=None):
-#     """
-#     Compute the gradient of V ⊗ ... ⊗ V in direction `Z`.
-#     """
-#     assert L % 2 == 0
-#     G = 0
-#     for i in range(L // 2):
-#         W = np.identity(1)
-#         for j in range(L // 2):
-#             if i == j:
-#                 W = np.kron(W, Z)
-#             else:
-#                 W = np.kron(W, V)
-#         G += W
-#     if perm is not None:
-#         G = permute_operation(G, perm)
-#     return G
-
 def parallel_gates_directed_grad_jax(V, L, Z, perm=None):
     grad_directed_gates = jax.grad(lambda v: jnp.trace(parallel_gates_directed(v, L, Z, perm).conj().T @ V).real)
     return grad_directed_gates(V)
@@ -177,23 +133,23 @@ def parallel_gates_hess(V, L, Z, U, perm=None, unitary_proj=False):
     return G
 
 
-# def parallel_gates_hess_jvp(V, L, Z, U, perm=None, unitary_proj=False):
-#     """
-#     Compute the Hessian of V -> Re tr[U† (V ⊗ ... ⊗ V)] in direction Z using JVP.
-#     """
-#     def jvp_parallel_gates(V, t, i):
-#         return parallel_gates(V + t * Z, i)
+def parallel_gates_hess_jvp(V, L, Z, U, perm=None, unitary_proj=False):
+    """
+    Compute the Hessian of V -> Re tr[U† (V ⊗ ... ⊗ V)] in direction Z using JVP.
+    """
+    def jvp_parallel_gates(V, t, i):
+        return parallel_gates(V + t * Z, i)
     
-#     def jvp_parallel_gates_grad(V, t, i):
-#         return jax.grad(lambda V: jnp.trace(U.conj().T @ parallel_gates(V, i)))(V + t * Z)
+    def jvp_parallel_gates_grad(V, t, i):
+        return jax.grad(lambda V: jnp.trace(U.conj().T @ parallel_gates(V, i)))(V + t * Z)
     
-#     G = jnp.zeros_like(V)
+    G = jnp.zeros_like(V)
     
-#     for i in range(0, L, 2):
-#         G += jax.jvp(lambda t: jnp.trace(U.conj().T @ jvp_parallel_gates(V, t, i)))(0.0, 0.0)[1]
-#         G += jax.jvp(lambda t: jnp.trace(U.conj().T @ jvp_parallel_gates_grad(V, t, i)))(0.0, 0.0)[1]
+    for i in range(0, L, 2):
+        G += jax.jvp(lambda t: jnp.trace(U.conj().T @ jvp_parallel_gates(V, t, i)))(0.0, 0.0)[1]
+        G += jax.jvp(lambda t: jnp.trace(U.conj().T @ jvp_parallel_gates_grad(V, t, i)))(0.0, 0.0)[1]
     
-#     return G
+    return G
 
 
 

@@ -235,38 +235,6 @@ class TestBrickwallCircuit(unittest.TestCase):
             dW_num = (f(h) - f(-h)) / (2*h)
             self.assertTrue(np.allclose(dW_num, dW))
 
-    # def test_brickwall_unitary_directed_gradient(self):
-    #     """
-    #     Test directed gradient computation for a brickwall of parallel gates.
-    #     """
-    #     rng = jax.random.PRNGKey(0)
-    #     # system size
-    #     L = 8
-    #     # number of layers
-    #     n = 5
-    #     # random unitaries
-    #     Vlist = [jax.random.normal(rng, (4, 4)) for _ in range(n)]
-    #     # random permutations
-    #     perms = [jax.random.permutation(rng, L) for _ in range(n)]
-    #     for k in range(n):
-    #         # direction
-    #         Z = 0.5 * jax.random.normal(rng, (4, 4))
-    #         # Define a scalar function that depends on Z and the output of brickwall_unitary_directed_grad
-    #         def scalar_function_to_differentiate(Z):
-    #             directed_grad_output = oc.brickwall_unitary_directed_grad(Vlist, L, Z, k, perms)
-    #             scalar_output = jnp.trace(directed_grad_output)  # Compute a scalar value from the output
-    #             return scalar_output
-            
-    #         # Calculate the gradient function
-    #         grad_scalar_function = grad(scalar_function_to_differentiate)
-    #         dW = grad_scalar_function(Z)
-            
-    #         # numerical gradient via finite difference approximation
-    #         f = lambda t: scalar_function_to_differentiate(Z + t)
-    #         h = 1e-6
-    #         dW_num = (f(h) - f(-h)) / (2 * h)
-    #         self.assertTrue(jnp.allclose(dW_num, dW))
-
     def test_brickwall_unitary_hessian(self):
         """
         Test Hessian computation for a brickwall of parallel gates.
